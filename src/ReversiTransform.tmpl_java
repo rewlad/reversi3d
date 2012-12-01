@@ -1,0 +1,55 @@
+my $classname = "ReversiTransform";
+my @directions = (
+    { id=>'north_west', sh=>'<<9', limit=>'0x007F7F7F7F7F7F7FL' },
+    { id=>'north',      sh=>'<<8', limit=>'0x00FFFFFFFFFFFFFFL' },
+    { id=>'north_east', sh=>'<<7', limit=>'0x00FEFEFEFEFEFEFEL' },
+    { id=>'west',       sh=>'<<1', limit=>'0x7F7F7F7F7F7F7F7FL' },
+    { id=>'east',       sh=>'>>>1',limit=>'0xFEFEFEFEFEFEFEFEL' },
+    { id=>'south_west', sh=>'>>>7',limit=>'0x7F7F7F7F7F7F7F00L' },
+    { id=>'south',      sh=>'>>>8',limit=>'0xFFFFFFFFFFFFFF00L' },
+    { id=>'south_east', sh=>'>>>9',limit=>'0xFEFEFEFEFEFEFE00L' },
+);
+$c.=qq#
+public class $classname {
+    final static long findMoves(
+        long mover_board, 
+        long opponent_board
+    ){
+        long free_board = ~ (mover_board | opponent_board);
+        long move_board = 0;
+        long capturable, dir_flip;        
+        #; for(@directions){$c.=qq#
+        capturable = opponent_board & $$_{limit};
+        dir_flip = ((mover_board & $$_{limit}) $$_{sh}) & capturable;
+        #; for my $n(2..6){$c.=qq#
+        dir_flip = (dir_flip | (dir_flip $$_{sh})) & capturable;
+        #;} $c.=qq#        
+        move_board |= (dir_flip $$_{sh}) & free_board;
+        #;} $c.=qq#
+        return move_board;
+    }
+    
+    final static long doMove(
+        long mover_board, 
+        long opponent_board,
+        long cur_cell
+    ){
+        long all_flip = cur_cell;
+        long dir_flip;
+        #; for(@directions){$c.=qq#
+        if( 
+            ( cur_cell & $$_{limit} )!=0 && 
+            ( dir_flip = ( cur_cell $$_{sh} ) & opponent_board & $$_{limit} )!=0 
+        ){
+            do{ dir_flip = dir_flip | (dir_flip $$_{sh}); }
+            while( ( dir_flip & opponent_board & $$_{limit} ) == dir_flip );
+            if( (dir_flip & mover_board)!=0 ) all_flip |= dir_flip;				
+        }
+        #;} $c.=qq#
+        return all_flip;
+    }
+}
+#;
+open OUTF, ">$classname.java";
+print OUTF $c;
+close OUTF;

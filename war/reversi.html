@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html><head>
+<title>REVERSI</title>
+<style>
+canvas { width: 100%; height: 100% }
+* {
+    font-family: "Lucida Grande", Geneva, Verdana, Arial, sans-serif;
+}
+.btn {
+    width: 200px;
+    margin: 5px;
+    padding: 5px;
+    background-color: #00AA00;
+    display: inline-block;
+    text-align: center;
+    border: 2px solid #AAAAAA;
+    border-radius: 15px;
+    font-weight: bold;
+}
+.hint {
+    margin: 5px;
+    padding: 5px;
+    display: inline-block;
+}
+</style>
+</head><body> 
+<script src="https://raw.github.com/mrdoob/three.js/master/build/three.js"></script>
+<script src="http://EasyWebsocket.org/easyWebSocket.min.js"></script>
+<script>'use strict';
+function board3d_viewer_constr(me){
+    var renderer, camera, mouse, projector;
+    me.get_dom_el = function(k){ return renderer.domElement };
+    me.init = function(scene,w,h){
+        renderer = new THREE.WebGLRenderer();
+        renderer.setSize(w,h);
+        mouse = new THREE.Vector2();
+        projector = new THREE.Projector();
+        camera = new THREE.PerspectiveCamera(75, w/h, 0.1, 2000); 
+        camera.position.x = 200;
+        camera.up.x = 0;
+        camera.up.y = 0;
+        camera.up.z = 1;
+        
+    }
+    me.set_size = function(w,h){
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w,h);
+    };
+    me.animation_frame = function(){
+        camera.position.z = 600 + me.jumping.z / 2;
+        camera.lookAt( me.jumping.scene.position );
+    };
+    me.render = function(scene){ renderer.render(scene,camera) };
+    me.get_pointer3d = function(x,y){
+        mouse.x = x * 2 - 1;
+        mouse.y = - y * 2 + 1;
+        var vector = new THREE.Vector3( mouse.x, mouse.y, 0.5 );
+        projector.unprojectVector( vector, camera );
+        return new THREE.Ray( camera.position, vector.subSelf( camera.position ).normalize() );
+    }
+    return me;
+}
+
+function make_fig_geometry(w,h,colors){
+    var shape = new THREE.Shape();
+    shape.absarc( 0, 0, w, 0, - Math.PI*2 );
+    var geometry = new THREE.ExtrudeGeometry( shape, { amount:h });
+    var ocolors = [];
+    colors.forEach(function(v,j){ ocolors[j] = new THREE.Color(v) });
+    geometry.faces.forEach(function(face){
+        face.color = ocolors[ face.normal.z>0.01 ?1: face.normal.z<-0.01 ?2:0 ];
+    });
+    return geometry;
+}
+
+function make_sq_geometry(r,ucolor,dcolor){
+    var geometry = new THREE.Geometry();
+    geometry.vertices.push( new THREE.Vector3(-r,-r));
+    geometry.vertices.push( new THREE.Vector3(+r,-r));
+    geometry.vertices.push( new THREE.Vector3(+r,+r));
+    geometry.vertices.push( new THREE.Vector3(-r,+r));
+    function face(v0,v1,v2,v3,n,color){
+        var normal = new THREE.Vector3(0,0,n);
+        var ocolor = new THREE.Color(color);
+        geometry.faces.push(new THREE.Face4(v0, v1, v2, v3, normal, ocolor, 0));
+    }
+    face(0, 1, 2, 3, 1, ucolor);
+    face(3, 2, 1, 0, -1, dcolor);
+    return geometry;
+}
+
+function board3d_scene_constr(me){
+    var size = 8, sq_sz = 100, ln_r = 5;
+    var grid_depth = 10, grid_color = 0xdddddd, cell_color = 0x00cc00, over_color = 0xffff00;
+    var fig_height = 15, fig_width=40, fig_colors = [0x000000,0xff0000,0x0000ff];
+
+    var scene = me.scene = new THREE.Scene();     
+    var material = new THREE.MeshLambertMaterial({vertexColors:true});
+
+    var fig_geometry = make_fig_geometry(fig_width,fig_height,fig_colors);
+    var grid_geometry = make_sq_geometry(size/2*sq_sz+ln_r,grid_color,grid_color);
+    var cell_geometry = make_sq_geometry((sq_sz-ln_r)/2,cell_color,over_color);
+
+    var grid_mesh = new THREE.Mesh(grid_geometry, material);
+    grid_mesh.position.z = -grid_depth;
+    scene.add(grid_mesh);
+
+    var fig_list = [], cell_mesh_list = [];
+    for(var ypos=0;ypos<size;ypos++){
+        for(var xpos=0;xpos<size;xpos++){
+            var fig_mesh = new THREE.Mesh(fig_geometry, material);
+            var cell_mesh = new THREE.Mesh(cell_geometry, material);
+            cell_mesh.position.x = fig_mesh.position.x = (xpos-size/2+0.5)*sq_sz;
+            cell_mesh.position.y = fig_mesh.position.y = (ypos-size/2+0.5)*sq_sz;
+            scene.add(fig_mesh);
+            scene.add(cell_mesh);
+            fig_list.push({mesh:fig_mesh});
+            cell_mesh.board_pos = cell_mesh_list.length;
+            cell_mesh_list.push(cell_mesh);
+        }
+    }
+
+    var directionalLight = new THREE.DirectionalLight( 0xffffff, 1 );
+    directionalLight.position.z = 1;
+    directionalLight.position.normalize();
+    scene.add( directionalLight );
+
+    var states = 
+        [{ z:1000, rot:Math.PI/2 }, { z:0, rot:0}, { z:fig_height, rot:Math.PI}];
+
+    fig_list.forEach(function(fig){
+        fig.pn_state = [states[0],states[0],states[0]];
+    });
+
+    var animation_start_moment=0, animation_q = [], over_board_pos = -1, state, can_move;
+    
+    function animation_time(now){
+        return Math.min((now - animation_start_moment)/1500, 2);
+    }
+    function animation_finished(now){ return animation_time(now)>=2 }
+    me.animation_frame = function(){
+        var now = Date.now();
+        if(animation_finished(now) && animation_q.length){
+            animation_start_moment = now;
+            animate_start(animation_q.shift())
+        }
+        var pn_period = animation_time(now);
+        can_move = me.is_local_mover() && animation_finished(now);
+        var step = pn_period > 1 ? 1:0;
+        var phase = pn_period - step;
+        var jz = me.jumping.z = pn_period > 1 ? Math.sin(phase*Math.PI)*100 : 0;
+        
+        fig_list.forEach(function(fig,j){
+            var p = fig.pn_state[step];
+            var n = fig.pn_state[step+1];
+            fig.mesh.position.z = p.z + (n.z-p.z)*phase + (p==n ? 0 : jz);
+            fig.mesh.rotation.y = p.rot + (n.rot-p.rot)*phase;
+            
+            var mv = can_move && fig.can_move;
+            cell_mesh_list[j].rotation.y = mv ? Math.PI:0;
+            cell_mesh_list[j].position.z = mv && over_board_pos===j 
+                ? -1-grid_depth : 1-grid_depth; 
+        });
+    }
+    me.state2dom = function(s){
+        if(!state || state.get_brd()!==s.get_brd() ) animation_q.push(s);
+        state = s;
+    };
+    function animate_start(gs){
+        gs.for_each_cell(function(j,bc){
+            var fig = fig_list[j];
+            fig.can_move = gs.can_move(j);
+            var nstate = states[bc];
+            var pstate = fig.pn_state[2];
+            fig.pn_state[0] = pstate;
+            fig.pn_state[1] = pstate === states[0] ? nstate : pstate;
+            fig.pn_state[2] = nstate;
+        });
+    }
+    me.ray2pos = function(ray){
+        if(!can_move) return -1;
+        var intersects = ray.intersectObjects( cell_mesh_list );
+        if(!intersects.length) return -1;
+        var pos = intersects[0].object.board_pos;
+        if(!fig_list[pos].can_move) return -1;
+        return pos;
+    }
+    me.target_by_ray = function(ray){ over_board_pos = me.ray2pos(ray) };
+    return me;
+}
+/******************************************************************************/
+
+var game_states = {};
+function game_state(state){
+    if(game_states[state]) return game_states[state];
+    var me = game_states[state] = {};
+    var parts = match(state);
+    var brd = parts[1], active = parseInt(parts[2]), players=[parts[3],parts[4]];
+    var passive = 3-active;
+    var board = [], moves;
+    board_unpack();
+    
+    function match(v){
+        return v.match(/^#([\da-fA-F]{32})([012])([a-z]\d*)([a-z]\d*)$/) ||
+            ['','00000008100000000000001008000000','1','n','n'];
+    }
+    me.serialized = function(){ return state };
+    me.get_brd = function(){ return brd };
+    me.get_brd4active = function(){ 
+        return active===1 ? brd: 
+               active===2 ? brd.substring(16,32) + brd.substring(0,16) : ''
+    };
+    me.get_player = function(num){ return players[num-1] };
+    me.replace_players = function(num,p1,p2){
+        return game_state('#' + board_pack(board,active) + 
+            ((num==1?p1:p2)||players[0])+
+            ((num==1?p2:p1)||players[1])
+        );
+    };
+    me.get_active_player_num = function(){ return active };
+    me.unpack_move = function(mb){
+        var v0 = parse(mb,0), v1 = parse(mb,1);
+        for(var i=0;i<32;i++){
+            if(1 & (v0 >> i)) return me.move(i+32);
+            if(1 & (v1 >> i)) return me.move(i);
+        }
+    }
+    function parse(brd,s){ return parseInt(brd.substring(s*8,s*8+8),16) }
+    function board_unpack(){
+        function merge(v0,v1,spos){
+            for(var i=0;i<32;i++) 
+                board[spos+i] = (1 & (v0 >> i)) | ((1 & (v1 >> i))<<1);
+        }
+        merge(parse(brd,1),parse(brd,3),0);
+        merge(parse(brd,0),parse(brd,2),32);
+    }
+    function board_pack(board,active){
+        var res = '';
+        function plp(pl){
+            for(var i=15;i>=0;i--) res+=(
+                (board[i*4+0]==pl?1:0)|
+                (board[i*4+1]==pl?2:0)|
+                (board[i*4+2]==pl?4:0)|
+                (board[i*4+3]==pl?8:0)
+            ).toString(16);
+        }
+        plp(1); plp(2);
+        return res + active.toString();
+    }
+    function find_moves(board,active){
+        var moves = [];
+        function chk(spos,ppos,pos){
+            var d = ppos%8-pos%8;
+            if(pos<0 || pos>=64 || d*d>1 || !board[pos]) return 0;
+            if(board[pos]===active) return 1;
+            if(!chk(spos,pos,pos+pos-ppos)) return 0;
+            if(!moves[spos]) moves[spos] = {count:0};
+            moves[spos][pos] = moves[spos][spos] = 1;
+            moves[spos].count++;
+            return 1;
+        }
+        me.for_each_cell(function(p,bc){ if(!board[p]){ // !!! board[p]!=bc
+            chk(p,p,p-9); chk(p,p,p-8); chk(p,p,p-7); chk(p,p,p-1);
+            chk(p,p,p+9); chk(p,p,p+8); chk(p,p,p+7); chk(p,p,p+1);
+        }});
+        return moves;
+    }
+    me.for_each_cell = function(f){ for(var p = 0; p<64; p++) f(p, board[p]) };
+    me.can_move = function(pos){
+        if(!moves) moves = find_moves(board,active);
+        return moves[pos] ? moves[pos].count:0;
+    };
+    me.move = function(pos){
+        if(!moves) moves = find_moves(board,active);
+        var mr = moves[pos];
+        if(!mr) return;
+        var nboard = [];
+        me.for_each_cell(function(j,bc){ nboard[j] = mr[j] ? active : bc });
+        var nactive = find_moves(nboard,passive).length ? passive :
+                      find_moves(nboard,active).length ? active : 0;
+        return game_state('#' + board_pack(nboard,nactive)+players[0]+players[1]);
+    }
+    
+    return me;
+}
+
+/******************************************************************************/
+
+function player_constr(num){
+    var me = {}, type = {};
+    var tp_abbr2nm = {'n':'none','l':'local','p':'peer','s':'server','d':'dummy'};
+    for(var abbr in tp_abbr2nm) type[tp_abbr2nm[abbr]] = {abbr:abbr};
+    
+    var dom_els = {};
+    function cached_div(h,k){ return h[k]||(h[k]=document.createElement('div'))}
+    me.get_dom_el = function(k){ return cached_div(dom_els,k) };
+    function state2ctp(state){
+        var plid = state.get_player(num);
+        return type[tp_abbr2nm[plid.substring(0,1)]];
+    }
+    function state2dom(ctp,state){
+        var main_el = me.get_dom_el('main');
+        main_el.innerHTML = 'Player #'+num+' ';
+        function player_selector(tp,locator){
+            if(ctp!==tp && ctp!==type.none) return;
+            var btel = me.get_dom_el('player_selector_'+tp.abbr);
+            me.btn( main_el, btel, tp.get_name()||'', function(state){
+                return state.replace_players(num, tp.abbr+locator, 0);
+            });
+        }
+        player_selector(type.local,'');
+        player_selector(type.dummy,'');
+        player_selector(type.peer,Date.now().toString());
+        player_selector(type.server,'');
+        if(ctp.state2hint) ctp.state2hint(state);
+    };
+    
+    
+    me.state_changed = function(){
+        var state = me.get_state();
+        var ctp = state2ctp(state);
+        state2dom(ctp,state);
+        if(ctp.sync_state) ctp.sync_state();
+        if(state.get_active_player_num()===num) 
+            if(ctp.find_best_move) ctp.find_best_move();
+    }
+    
+    
+    type.none.get_name = function(){};
+    type.local.get_name = function(){ return 'local human' };
+    type.peer.get_name = function(){ return 'remote human' };
+    type.server.get_name = function(){ return 'remote robot' };
+    type.dummy.get_name = function(){ return 'local robot' };
+    
+    
+    type.peer.state2hint = function(state){
+        var hint_el = me.get_dom_el('hint');
+        hint_el.className = 'hint';
+        var href = location.origin + location.pathname + peer_state(state);
+        hint_el.innerHTML = 'Send link <a href="'+href+'">'+href+'</a> to peer ';
+        me.get_dom_el('main').appendChild(hint_el);
+    };
+    var socket, plid2socket;
+    function need_socket(plid){
+        if(socket && plid2socket===plid) return socket;
+        socket = new EasyWebSocket("ws://reversi.rewlad/"+plid);
+        socket.onmessage = function(ev){ me.set_state(game_state(ev.data)) };
+        plid2socket = plid;
+        return socket;
+    }
+    function peer_state(state){
+        var peer_id = state.get_player(num);
+        return state.replace_players(num, type.local.abbr, peer_id).serialized();
+    }
+    type.peer.sync_state = function(){
+        var state = me.get_state();
+        need_socket(state.get_player(num)).send(peer_state(state));
+    };
+    
+    
+    type.local.find_best_move = function(){ me.set_local_mover(1) };
+    
+    
+    type.dummy.find_best_move = function(){
+        var sinc=0, spos=-1, state = me.get_state();
+        state.for_each_cell(function(pos,bc){
+            var inc = state.can_move(pos);
+            if(sinc<inc){sinc=inc; spos=pos}
+        });
+        if(spos>=0) me.set_state(state.move(spos))
+    };
+    
+    
+    type.server.find_best_move = function(){
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open('GET', '/shifter/'+me.get_state().get_brd4active(), true);
+        xmlhttp.onreadystatechange = function(){
+            if(xmlhttp.readyState === 4) if(xmlhttp.status === 200) 
+                me.set_state(me.get_state().unpack_move(xmlhttp.responseText));
+        };
+        xmlhttp.send(null);
+    };
+    
+    
+    return me;
+};
+
+window.onload = function(){
+    function hash_get_state(){ return game_state(location.hash) }
+    function hash_set_state(gs){ if(gs) location.hash = gs.serialized() }
+
+    var players = [ player_constr(1), player_constr(2) ];
+
+    var board3d_scene = board3d_scene_constr({});
+    var board3d_viewer = board3d_viewer_constr({});
+    board3d_viewer.init(board3d_scene.scene, window.innerWidth, window.innerHeight);
+    var jumping = board3d_viewer.jumping = board3d_scene.jumping = {};
+    jumping.scene = board3d_scene.scene;
+    board3d_scene.is_local_mover = function(){ return is_local_mover };
+    
+    function render() { 
+        requestAnimationFrame(render);
+        board3d_scene.animation_frame();
+        board3d_viewer.animation_frame();
+        board3d_viewer.render(board3d_scene.scene);
+    }
+    
+    var is_local_mover;
+    function hash_changed(){
+        is_local_mover = 0;
+        players.forEach(function(player,j){ player.state_changed() });
+        board3d_scene.state2dom(hash_get_state()); 
+    }
+
+    var p = document.body;
+    p.appendChild(board3d_viewer.get_dom_el('main'));
+    
+    function div_level(c,j){
+        p.appendChild(c);
+        c.style.position = 'absolute';
+        c.style.top = (20 + 35 * j)+'px';
+        c.style.left = '0px';
+    }
+    function btn(ptel,btel,html,act){
+        btel.className = 'btn';
+        btel.innerHTML = html;
+        btel.onclick = function(ev){ hash_set_state(act(hash_get_state())) };
+        ptel.appendChild(btel);
+    }
+        
+        
+        
+    var top_el = document.createElement('div')
+    div_level(top_el,0);
+    
+
+    btn(top_el, document.createElement('div'), 'reset game', function(gs){ 
+        return game_state('').replace_players(1,gs.get_player(1),gs.get_player(2));
+    });
+    btn(top_el, document.createElement('div'),'reset with players',function(gs){ 
+        return game_state('') 
+    });
+    
+    players.forEach(function(pl,j){ 
+        div_level(pl.get_dom_el('main'),j+1);
+        pl.btn = btn;
+        pl.get_state = hash_get_state;
+        pl.set_state = hash_set_state;
+        pl.set_local_mover = function(v){ is_local_mover = v };
+    });
+    
+    var inp = document.createElement('input');
+    inp.value = localStorage.getItem('reversi-background-image') || 
+        'http://openclipart.org/people/shokunin/shokunin_sky_with_clouds.svg';
+    inp.onchange = function(ev){bgchange()};
+    function bgchange(){
+        localStorage.setItem('reversi-background-image',inp.value);
+        p.style.background = "url("+inp.value+") no-repeat";
+        p.style.backgroundSize = "100% 100%";
+    };
+    bgchange();
+    p.appendChild(inp);
+    
+    
+    window.onresize = function(){
+        board3d_viewer.set_size(window.innerWidth, window.innerHeight);
+    };
+    function ray(ev){
+        return board3d_viewer.get_pointer3d(
+            ev.clientX / window.innerWidth, ev.clientY / window.innerHeight
+        );
+    }
+    window.onmousemove = function(ev){
+        board3d_scene.target_by_ray(ray(ev));
+    }
+    board3d_viewer.get_dom_el('main').onclick = function(ev){
+        var pos = board3d_scene.ray2pos(ray(ev));
+        if(pos<0) return;
+        hash_set_state(hash_get_state().move(pos));
+    };
+    window.onhashchange = hash_changed;
+    
+    hash_changed();
+    render(); 
+};
+
+</script>
+</body> </html> 
