@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html><head>
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
 <title>REVERSI</title>
 <style>
 canvas { width: 100%; height: 100% }
@@ -24,8 +25,9 @@ canvas { width: 100%; height: 100% }
 }
 </style>
 </head><body> 
-<script src="https://raw.github.com/mrdoob/three.js/master/build/three.js"></script>
-<script src="http://EasyWebsocket.org/easyWebSocket.min.js"></script>
+<script type="text/javascript" src="/three.min.js"></script>
+<script type="text/javascript" src="/_ah/channel/jsapi"></script>
+<!--script src="http://EasyWebsocket.org/easyWebSocket.min.js"></script-->
 <script>'use strict';
 function board3d_viewer_constr(me){
     var renderer, camera, mouse, projector;
@@ -195,28 +197,29 @@ var game_states = {};
 function game_state(state){
     if(game_states[state]) return game_states[state];
     var me = game_states[state] = {};
-    var parts = match(state);
-    var brd = parts[1], active = parseInt(parts[2]), players=[parts[3],parts[4]];
+    var parts = state.match(
+        /^([\da-fA-F]{32})([012])([\dA-Fa-f]*)([g-z][\dA-Fa-f]*)([g-z][\dA-Fa-f]*)$/
+    ) || ['','00000008100000000000001008000000','1','','n','n'];
+    var brd = parts[1], active = parseInt(parts[2]);
+    var chan = parts[3], players = [parts[4],parts[5]];
     var passive = 3-active;
     var board = [], moves;
     board_unpack();
     
-    function match(v){
-        return v.match(/^#([\da-fA-F]{32})([012])([a-z]\d*)([a-z]\d*)$/) ||
-            ['','00000008100000000000001008000000','1','n','n'];
-    }
     me.serialized = function(){ return state };
     me.get_brd = function(){ return brd };
     me.get_brd4active = function(){ 
         return active===1 ? brd: 
                active===2 ? brd.substring(16,32) + brd.substring(0,16) : ''
     };
-    me.get_player = function(num){ return players[num-1] };
-    me.replace_players = function(num,p1,p2){
-        return game_state('#' + board_pack(board,active) + 
+    me.replace_players = function(num,chan,p1,p2){
+        return game_state(board_pack(board,active) + chan +
             ((num==1?p1:p2)||players[0])+
             ((num==1?p2:p1)||players[1])
         );
+    };
+    me.with_players = function(num,f){
+        return num==1 ? f(chan,players[0],players[1]) : f(chan,players[1],players[0])
     };
     me.get_active_player_num = function(){ return active };
     me.unpack_move = function(mb){
@@ -279,7 +282,7 @@ function game_state(state){
         me.for_each_cell(function(j,bc){ nboard[j] = mr[j] ? active : bc });
         var nactive = find_moves(nboard,passive).length ? passive :
                       find_moves(nboard,active).length ? active : 0;
-        return game_state('#' + board_pack(nboard,nactive)+players[0]+players[1]);
+        return game_state(board_pack(nboard,nactive)+chan+players[0]+players[1]);
     }
     
     return me;
@@ -289,43 +292,56 @@ function game_state(state){
 
 function player_constr(num){
     var me = {}, type = {};
-    var tp_abbr2nm = {'n':'none','l':'local','p':'peer','s':'server','d':'dummy'};
+    var tp_abbr2nm = {'n':'none','l':'local','p':'peer','s':'server','m':'dummy'};
     for(var abbr in tp_abbr2nm) type[tp_abbr2nm[abbr]] = {abbr:abbr};
     
     var dom_els = {};
     function cached_div(h,k){ return h[k]||(h[k]=document.createElement('div'))}
     me.get_dom_el = function(k){ return cached_div(dom_els,k) };
     function state2ctp(state){
-        var plid = state.get_player(num);
-        return type[tp_abbr2nm[plid.substring(0,1)]];
+        return state.with_players(num,function(chan,pm,po){
+            return type[tp_abbr2nm[pm.substring(0,1)]];
+        });
     }
     function state2dom(ctp,state){
         var main_el = me.get_dom_el('main');
         main_el.innerHTML = 'Player #'+num+' ';
-        function player_selector(tp,locator){
+        function player_selector(tp){
             if(ctp!==tp && ctp!==type.none) return;
             var btel = me.get_dom_el('player_selector_'+tp.abbr);
-            me.btn( main_el, btel, tp.get_name()||'', function(state){
-                return state.replace_players(num, tp.abbr+locator, 0);
+            me.btn( main_el, btel, tp.get_name(), function(){
+                if(tp.select){ tp.select(); return }
+                var state = me.get_state();
+                state.with_players(num,function(chan,pm,po){
+                    me.set_state(state.replace_players(num,chan,tp.abbr,po))
+                })
             });
         }
-        player_selector(type.local,'');
-        player_selector(type.dummy,'');
-        player_selector(type.peer,Date.now().toString());
-        player_selector(type.server,'');
+        player_selector(type.local);
+        player_selector(type.dummy);
+        player_selector(type.peer);
+        player_selector(type.server);
         if(ctp.state2hint) ctp.state2hint(state);
     };
-    
-    
-    me.state_changed = function(){
+    me.sync_state = function(){
         var state = me.get_state();
         var ctp = state2ctp(state);
         state2dom(ctp,state);
         if(ctp.sync_state) ctp.sync_state();
-        if(state.get_active_player_num()===num) 
-            if(ctp.find_best_move) ctp.find_best_move();
+    };
+    me.find_best_move = function(){
+        var ctp = state2ctp(me.get_state());
+        if(ctp.find_best_move) ctp.find_best_move();
     }
-    
+    function http_req(meth,url,frecv){
+        var xmlhttp = new XMLHttpRequest();
+        xmlhttp.open(meth, url, true);
+        xmlhttp.onreadystatechange = function(){
+            if(xmlhttp.readyState === 4) if(xmlhttp.status === 200) 
+                frecv(xmlhttp.responseText);
+        };
+        xmlhttp.send(null);
+    }
     
     type.none.get_name = function(){};
     type.local.get_name = function(){ return 'local human' };
@@ -337,10 +353,18 @@ function player_constr(num){
     type.peer.state2hint = function(state){
         var hint_el = me.get_dom_el('hint');
         hint_el.className = 'hint';
-        var href = location.origin + location.pathname + peer_state(state);
+        var href = location.origin + location.pathname + '#' + peer_state(state);
         hint_el.innerHTML = 'Send link <a href="'+href+'">'+href+'</a> to peer ';
         me.get_dom_el('main').appendChild(hint_el);
     };
+    function peer_state(state){
+        return state.with_players(num,function(chan,pm,po){
+            return state.replace_players( num, 
+                pm.substring(1), type.local.abbr, pm.substring(0,1)+chan
+            ).serialized();
+        });
+    }
+    /*
     var socket, plid2socket;
     function need_socket(plid){
         if(socket && plid2socket===plid) return socket;
@@ -349,15 +373,40 @@ function player_constr(num){
         plid2socket = plid;
         return socket;
     }
-    function peer_state(state){
-        var peer_id = state.get_player(num);
-        return state.replace_players(num, type.local.abbr, peer_id).serialized();
-    }
     type.peer.sync_state = function(){
         var state = me.get_state();
         need_socket(state.get_player(num)).send(peer_state(state));
+    };*/
+    type.peer.select = function(repl){
+        http_req('POST','/peer?create=uuid',function(txt){
+            var p = txt.split('-');
+            me.get_state().with_players(num, function(chan,pm,po){
+                var nchan = chan || p[0];
+                var npm = type.peer.abbr + p[4];
+                me.set_state(me.get_state().replace_players(num,nchan,npm,po));
+            });
+        });
     };
-    
+    var socket, sock_key;
+    function onmessage(msg){ 
+        var m = msg.data.match(/\w+/);
+        if(m) me.set_state(game_state(m[0]));
+    }
+    function voidact(){}
+    type.peer.sync_state = function(){
+        var state = me.get_state();
+        state.with_players(num, function(chan,pm,po){
+            var url = '/peer?peer='+pm.substring(1)+'&state='+peer_state(state);
+            var create = socket && sock_key===chan ? '':'&create='+chan;
+            http_req('POST', url+create, function(token){
+                if(!create) return;
+                sock_key = chan;
+                var channel = new goog.appengine.Channel(token);
+                
+                socket = channel.open({ onmessage:onmessage, onopen:voidact });//onclose/onerror
+            });
+        });
+    };
     
     type.local.find_best_move = function(){ me.set_local_mover(1) };
     
@@ -371,24 +420,19 @@ function player_constr(num){
         if(spos>=0) me.set_state(state.move(spos))
     };
     
-    
     type.server.find_best_move = function(){
-        var xmlhttp = new XMLHttpRequest();
-        xmlhttp.open('GET', '/shifter/'+me.get_state().get_brd4active(), true);
-        xmlhttp.onreadystatechange = function(){
-            if(xmlhttp.readyState === 4) if(xmlhttp.status === 200) 
-                me.set_state(me.get_state().unpack_move(xmlhttp.responseText));
-        };
-        xmlhttp.send(null);
+        var url = '/shifter/'+me.get_state().get_brd4active();
+        http_req('GET', url, function(txt){
+            me.set_state(me.get_state().unpack_move(txt));
+        })
     };
-    
     
     return me;
 };
 
 window.onload = function(){
-    function hash_get_state(){ return game_state(location.hash) }
-    function hash_set_state(gs){ if(gs) location.hash = gs.serialized() }
+    function hash_get_state(){ return game_state(location.hash.substring(1)) }
+    function hash_set_state(gs){ if(gs) location.hash = '#' + gs.serialized() }
 
     var players = [ player_constr(1), player_constr(2) ];
 
@@ -409,8 +453,11 @@ window.onload = function(){
     var is_local_mover;
     function hash_changed(){
         is_local_mover = 0;
-        players.forEach(function(player,j){ player.state_changed() });
-        board3d_scene.state2dom(hash_get_state()); 
+        players.forEach(function(player,j){ player.sync_state() });
+        var state = hash_get_state()
+        board3d_scene.state2dom(state);
+        var num = state.get_active_player_num();
+        if(num) players[num-1].find_best_move();
     }
 
     var p = document.body;
@@ -425,7 +472,7 @@ window.onload = function(){
     function btn(ptel,btel,html,act){
         btel.className = 'btn';
         btel.innerHTML = html;
-        btel.onclick = function(ev){ hash_set_state(act(hash_get_state())) };
+        btel.onclick = function(ev){ act() };
         ptel.appendChild(btel);
     }
         
@@ -435,11 +482,14 @@ window.onload = function(){
     div_level(top_el,0);
     
 
-    btn(top_el, document.createElement('div'), 'reset game', function(gs){ 
-        return game_state('').replace_players(1,gs.get_player(1),gs.get_player(2));
+    btn(top_el, document.createElement('div'), 'reset game', function(){
+        var num = 1;
+        hash_get_state().with_players(num, function(chan,pm,po){
+            hash_set_state( game_state('').replace_players(num,chan,pm,po) );
+        });
     });
-    btn(top_el, document.createElement('div'),'reset with players',function(gs){ 
-        return game_state('') 
+    btn(top_el, document.createElement('div'),'reset with players',function(){ 
+        hash_set_state(game_state(''))
     });
     
     players.forEach(function(pl,j){ 
