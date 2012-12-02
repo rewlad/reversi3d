@@ -330,7 +330,8 @@ function player_constr(num){
         if(ctp.sync_state) ctp.sync_state();
     };
     me.find_best_move = function(){
-        var ctp = state2ctp(me.get_state());
+        var state = me.get_state();
+        var ctp = state2ctp(state);
         if(ctp.find_best_move) ctp.find_best_move();
     }
     function http_req(meth,url,frecv){
@@ -409,21 +410,40 @@ function player_constr(num){
     };
     
     type.local.find_best_move = function(){ me.set_local_mover(1) };
-    
+
+
+    function move_delayed_redo(reg){
+        var state = me.get_state();
+        var nstate = reg.moves_found && reg.moves_found[state.serialized()];
+        if(nstate) setTimeout(function(){ move_do(state,nstate) },6000);
+        return nstate;
+    }
+    function move_found(reg,state,nstate){
+        if(!reg.moves_found) reg.moves_found = {};
+        reg.moves_found[state.serialized()] = nstate;
+        move_do(state,nstate)
+    }
+    function move_do(state,nstate){ 
+        if(state===me.get_state()) me.set_state(nstate) 
+    }
     
     type.dummy.find_best_move = function(){
-        var sinc=0, spos=-1, state = me.get_state();
+        if(move_delayed_redo(type.dummy)) return;
+        var sinc=0, spos=-1;
+        var state = me.get_state();
         state.for_each_cell(function(pos,bc){
             var inc = state.can_move(pos);
             if(sinc<inc){sinc=inc; spos=pos}
         });
-        if(spos>=0) me.set_state(state.move(spos))
+        if(spos>=0) move_found(type.dummy, state, state.move(spos))
     };
     
     type.server.find_best_move = function(){
-        var url = '/shifter/'+me.get_state().get_brd4active();
+        if(move_delayed_redo(type.server)) return;
+        var state = me.get_state();
+        var url = '/shifter/'+state.get_brd4active();
         http_req('GET', url, function(txt){
-            me.set_state(me.get_state().unpack_move(txt));
+            move_found(type.server, state, state.unpack_move(txt));
         })
     };
     
@@ -534,6 +554,16 @@ window.onload = function(){
     hash_changed();
     render(); 
 };
+/*
+select player, find_best_move, move => set hash
+reset => set hash
+sync from peer * => set hash or hist go
 
+paste
+hist back
+
+avoid robot turn
+avoid sync break hist
+*/
 </script>
 </body> </html> 
