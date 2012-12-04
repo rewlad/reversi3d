@@ -27,7 +27,18 @@ canvas { width: 100%; height: 100% }
 </head><body> 
 <script type="text/javascript" src="/three.min.js"></script>
 <script type="text/javascript" src="/_ah/channel/jsapi"></script>
-<!--script src="http://EasyWebsocket.org/easyWebSocket.min.js"></script-->
+<audio id="snd_slam"><source src="slam.ogg" type="audio/ogg" /></audio>
+<audio id="snd_fanfare"><source src="fanfare.ogg" type="audio/ogg" /></audio>
+<!--
+LIBS USED:
+http://mrdoob.github.com/three.js/
+https://developers.google.com/appengine/docs/java/channel/javascript
+
+ORIGINAL ART WAS PUBLISHED UNDER DIFFERENT CC TERMS AT:
+http://www.freesound.org/people/Timbre/sounds/110317/download/110317__timbre__remix-of-62176-fanfare-before-after.wav
+http://www.freesound.org/people/Lunardrive/sounds/48980/download/48980__lunardrive__metal-door-slam-soundsmith.wav
+http://openclipart.org/people/shokunin/shokunin_sky_with_clouds.svg
+-->
 <script>'use strict';
 function board3d_viewer_constr(me){
     var renderer, camera, mouse, projector;
@@ -131,60 +142,7 @@ function board3d_scene_constr(me){
     var states = 
         [{ z:1000, rot:Math.PI/2 }, { z:0, rot:0}, { z:fig_height, rot:Math.PI}];
 
-
-/*
-    fig_list.forEach(function(fig){
-        fig.pn_state = [states[0],states[0],states[0]];
-    });
-
-    var animation_start_moment=0, animation_q = [], over_board_pos = -1, state, can_move;
-    
-    function animation_time(now){
-        return Math.min((now - animation_start_moment)/1500, 2);
-    }
-    function animation_finished(now){ return animation_time(now)>=2 }
-    me.animation_frame = function(){
-        var now = Date.now();
-        if(animation_finished(now) && animation_q.length){
-            animation_start_moment = now;
-            animate_start(animation_q.shift())
-        }
-        var pn_period = animation_time(now);
-        can_move = me.is_local_mover() && animation_finished(now);
-        var step = pn_period > 1 ? 1:0;
-        var phase = pn_period - step;
-        var jz = me.jumping.z = pn_period > 1 ? Math.sin(phase*Math.PI)*100 : 0;
-        
-        fig_list.forEach(function(fig,j){
-            var p = fig.pn_state[step];
-            var n = fig.pn_state[step+1];
-            fig.mesh.position.z = p.z + (n.z-p.z)*phase + (p==n ? 0 : jz);
-            fig.mesh.rotation.y = p.rot + (n.rot-p.rot)*phase;
-            
-            var mv = can_move && fig.can_move;
-            cell_mesh_list[j].rotation.y = mv ? Math.PI:0;
-            cell_mesh_list[j].position.z = mv && over_board_pos===j 
-                ? -1-grid_depth : 1-grid_depth; 
-        });
-    }
-    me.state2dom = function(s){
-        if(!state || state.get_brd()!==s.get_brd() ) animation_q.push(s);
-        state = s;
-    };
-    function animate_start(gs){
-        gs.for_each_cell(function(j,bc){
-            var fig = fig_list[j];
-            fig.can_move = gs.can_move(j);
-            var nstate = states[bc];
-            var pstate = fig.pn_state[2];
-            fig.pn_state[0] = pstate;
-            fig.pn_state[1] = pstate === states[0] ? nstate : pstate;
-            fig.pn_state[2] = nstate;
-        });
-    }
-*/
 //////////////////////////////////////
-    
     
     var animation_q = [], last_moment=0;
     me.animation_frame = function(){
@@ -215,6 +173,16 @@ function board3d_scene_constr(me){
         });
     }
     me.state2dom = function(s){ state2q(s); state = s; };
+    //function once(){ var was=0; function(f){ if(!(was++)) f() } }
+    function periodical_sound(times,period,id){
+        var until = 0, snd = document.getElementById(id);
+        return function(f){
+            var now = Date.now()
+            if(times && until < now){ 
+                times--; until = now + period; snd.cloneNode(true).play();
+            }
+        }
+    }
     function state2q(gs){
         if(state && state.serialized()===gs.serialized()) return;
         var ps = last_states||[], n1s = [], n2s = [], can_move = [];
@@ -233,8 +201,10 @@ function board3d_scene_constr(me){
             animate_state(ps,n1s,Math.min(1,phase),0,0,0);
             return phase < 1;
         });
+        var slam = is_putting && periodical_sound(1,0,'snd_slam');
         animation_q_push( is_changing?1500:200, function(phase){
-            var cm = phase > 1 && me.state4local_mover()===gs && can_move;
+            if(slam) slam();
+            var cm = phase > 1 && me.state4local(gs) && can_move;
             var cam_jump = is_putting ? 100:0;
             animate_state(n1s,n2s,Math.min(1,phase),jmps,cam_jump, cm);
             return phase < 1;
@@ -244,7 +214,10 @@ function board3d_scene_constr(me){
         pl_jmp[1] = gs.get_player_diff(1)<0 ? 0:100;
         pl_jmp[2] = gs.get_player_diff(2)<0 ? 0:100;
         gs.for_each_cell(function(j,bc){ win_jmps[j] = pl_jmp[bc] });
+        var fanfare = 
+            me.state4local(gs) && periodical_sound(4,5000,'snd_fanfare');
         animation_q_push(1500,function(phase){
+            if(fanfare) fanfare();
             animate_state(n2s,n2s,phase,win_jmps,0,0);
             return 0;
         });
@@ -390,8 +363,9 @@ function player_constr(num){
         var main_el = me.get_dom_el('main');
         main_el.innerHTML = '';
         var sc = state.get_player_score(num);
-        var ws = !state.get_active_player_num() && state.get_player_diff(num)>0 
-            ? ' WINS':'';
+        var wns = !state.get_active_player_num() && state.get_player_diff(num)>0;
+        var ws = wns ? ' WINS':'';
+        if(wns && ctp===type.local) me.set_state4local(state);
         var btel = me.get_dom_el('player_color');
         me.btn( main_el, btel, me.bgcolor, sc+ws, function(){/*...*/});
         
@@ -499,7 +473,7 @@ function player_constr(num){
     };
     
     type.local.find_best_move = function(){ 
-        me.set_state4local_mover(me.get_state());
+        me.set_state4local(me.get_state());
     };
 
 
@@ -563,7 +537,7 @@ window.onload = function(){
     board3d_viewer.init(board3d_scene.scene, window.innerWidth, window.innerHeight);
     var jumping = board3d_viewer.jumping = board3d_scene.jumping = {};
     jumping.scene = board3d_scene.scene;
-    board3d_scene.state4local_mover = function(){ return state4local_mover };
+    board3d_scene.state4local = function(gs){ return state4local===gs };
     
     function render() { 
         requestAnimationFrame(render);
@@ -572,7 +546,7 @@ window.onload = function(){
         board3d_viewer.render(board3d_scene.scene);
     }
     
-    var state4local_mover;
+    var state4local;
     function hash_changed(){
         players.forEach(function(player,j){ player.sync_state() });
         var state = hash_get_state()
@@ -622,13 +596,12 @@ window.onload = function(){
         pl.btn = btn;
         pl.get_state = hash_get_state;
         pl.set_state = hash_set_state;
-        pl.set_state4local_mover = function(v){ state4local_mover = v };
+        pl.set_state4local = function(v){ state4local = v };
         pl.bgcolor = fig_colors[num];
     });
     
     var inp = document.createElement('input');
-    inp.value = localStorage.getItem('reversi-background-image') || 
-        'http://openclipart.org/people/shokunin/shokunin_sky_with_clouds.svg';
+    inp.value = localStorage.getItem('reversi-background-image') || 'sky.svg';
     inp.onchange = function(ev){bgchange()};
     function bgchange(){
         localStorage.setItem('reversi-background-image',inp.value);
@@ -672,4 +645,4 @@ avoid robot turn
 avoid sync break hist
 */
 </script>
-</body> </html> 
+</body></html> 
