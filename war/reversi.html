@@ -23,7 +23,7 @@ canvas { width: 100%; height: 100% }
     padding: 5px;
     display: inline-block;
 }
-#txt_rules, #txt_notes {
+#txt_rules, #txt_notes, #txt_players {
     width: 80%;
     height: 80%;
     position: absolute;
@@ -33,6 +33,11 @@ canvas { width: 100%; height: 100% }
     margin:30px 10%;
     padding:20px;
     display:none;
+}
+#ctl_area {
+    position: absolute;
+    top: 20px;
+    left: 20px;
 }
 </style>
 </head><body> 
@@ -361,19 +366,18 @@ function player_constr(num){
         });
     }
     function state2dom(ctp,state){
+        var wns = !state.get_active_player_num() && state.get_player_diff(num)>0;
+        if(wns && ctp===type.local) me.set_state4local(state);
+
+        me.get_dom_el('score').innerHTML = ctp.get_name() + ( ctp===type.none ? 
+            '' : ': '+ state.get_player_score(num) + (wns ? ' WINS':'') );
+        
         var main_el = me.get_dom_el('main');
         main_el.innerHTML = '';
-        var sc = state.get_player_score(num);
-        var wns = !state.get_active_player_num() && state.get_player_diff(num)>0;
-        var ws = wns ? ' WINS':'';
-        if(wns && ctp===type.local) me.set_state4local(state);
-        var btel = me.get_dom_el('player_color');
-        me.btn( main_el, btel, me.bgcolor, sc+ws, function(){/*...*/});
-        
         function player_selector(tp){
             if(ctp!==tp && ctp!==type.none) return;
             var btel = me.get_dom_el('player_selector_'+tp.abbr);
-            me.btn( main_el, btel, 0, tp.get_name(), function(){
+            me.btn( main_el, btel, me.bgcolor, tp.get_name(), function(){
                 if(tp.select){ tp.select(); return }
                 var state = me.get_state();
                 state.with_players(num,function(chan,pm,po){
@@ -408,11 +412,11 @@ function player_constr(num){
         xmlhttp.send(null);
     }
     
-    type.none.get_name = function(){};
-    type.local.get_name = function(){ return 'local human' };
-    type.peer.get_name = function(){ return 'remote human' };
+    type.none.get_name   = function(){ return 'select player' };
+    type.local.get_name  = function(){ return 'local human' };
+    type.peer.get_name   = function(){ return 'remote human' };
     type.server.get_name = function(){ return 'remote robot' };
-    type.dummy.get_name = function(){ return 'local robot' };
+    type.dummy.get_name  = function(){ return 'local robot' };
     
     
     type.peer.state2hint = function(state){
@@ -560,12 +564,8 @@ window.onload = function(){
     var p = document.body;
     p.appendChild(board3d_viewer.get_dom_el('main'));
     
-    function div_level(c,j){
-        document.getElementById('ctl_area').appendChild(c);
-        c.style.position = 'absolute';
-        c.style.top = (20 + 35 * j)+'px';
-        c.style.left = '20px';
-    }
+    var top_el = document.getElementById('ctl_area');
+    
     function btn(ptel,btel,bgc,html,act){
         if(!bgc) bgc = '#00AA00';
         btel.className = 'btn';
@@ -575,40 +575,40 @@ window.onload = function(){
         btel.onclick = function(ev){ act() };
         ptel.appendChild(btel);
     }
-        
-        
-        
-    var top_el = document.createElement('div')
-    div_level(top_el,0);
+    function div(){ return document.createElement('div') }
+    var dlg_hides = [];
+    function txt_dialog(id){
+        var el = document.getElementById(id);
+        var bts_el = div();
+        bts_el.style.textAlign = 'right';
+        el.appendChild(bts_el);
+        function hide(){ el.style.display = 'none' }
+        dlg_hides.push(hide);
+        btn(bts_el,div(),0,'close',hide);
+        return function(){
+            dlg_hides.forEach(function(f){ f() });
+            el.style.display = 'block'
+        };
+    }
     
-
-    btn(top_el, document.createElement('div'), 0, 'reset game', function(){
+    btn(top_el, div(), 0, 'reset game', function(){
         var num = 1;
         hash_get_state().with_players(num, function(chan,pm,po){
             hash_set_state( game_state('').replace_players(num,chan,pm,po) );
         });
     });
-    btn(top_el, document.createElement('div'), 0,'reset with players',function(){ 
+    btn(top_el, div(), 0,'reset with players',function(){ 
         hash_set_state(game_state(''))
     });
-    function txt_dialog(id,capt){
-        var txt_rules = document.getElementById(id);
-        btn(top_el,document.createElement('div'),0,capt,function(){ 
-            txt_rules.style.display = 'block';
-        });
-        var bts_el = document.createElement('div');
-        bts_el.style.textAlign = 'right';
-        txt_rules.appendChild(bts_el);
-        btn(bts_el,document.createElement('div'),0,'close',function(){ 
-            txt_rules.style.display = 'none';
-        });
-    }
-    txt_dialog('txt_rules','history &amp; rules');
-    txt_dialog('txt_notes','release features');
+    btn(top_el,div(),0,'history &amp; rules',txt_dialog('txt_rules'));
+    btn(top_el,div(),0,'release features',txt_dialog('txt_notes'));
+    var dlg_players = txt_dialog('txt_players');
+    var players_bts_el = document.getElementById('players_bts');
     
     players.forEach(function(pl,j){
         var num = j+1;
-        div_level(pl.get_dom_el('main'),num);
+        btn(top_el, pl.get_dom_el('score'), fig_colors[num], '', dlg_players);
+        players_bts_el.appendChild(pl.get_dom_el('main'));
         pl.btn = btn;
         pl.get_state = hash_get_state;
         pl.set_state = hash_set_state;
@@ -702,14 +702,12 @@ avoid sync break hist
             </ul>
         </li>
     </ul>
-    
     <h2>Known issues:</h2>
     <ul>
         <li>Browser history does not work as expected in multiplayer.</li>
         <li>Game is testing in firefox and chrome, however it will likely not work in other browsers, that I do not have.</li>
         <li>Game layout breaks on low window sizes.</li>
     </ul>
-    
     <h2>3rd party components used in the game:</h2>
     <ul>
         <li><a href="http://mrdoob.github.com/three.js/">three.js</a> 3D library (the only mandatory component) with <a href="http://learningthreejs.com/">examples</a>.</li>
@@ -720,7 +718,23 @@ avoid sync break hist
             <a href="http://www.freesound.org/people/Lunardrive/sounds/48980/download/48980__lunardrive__metal-door-slam-soundsmith.wav">slam</a>,
             <a href="http://openclipart.org/people/shokunin/shokunin_sky_with_clouds.svg">sky</a>.</li>
     </ul>
-
+    </div>
+    
+    <div id="txt_players">
+    <h2>Select players</h2>
+    <ul>
+        <li>remote players requires persistent availability to the server</li>
+        <li>local robot -- stupid and greedy one</li>
+        <li>remote robot -- advanced one, thinks many turns forward</li>
+        <!--
+        What are the features of ReversiPlayerShifter4?
+        - Alpha-Beta with sorting by eval-function on lower depths.
+        - Iterative deeping with time limit.
+        - Mobility-count eval-function instead of counting central stones.
+        - Bit-board based speed-up.
+        -->
+    </ul>
+        <div id="players_bts"></div>
     </div>
     
 </div>
