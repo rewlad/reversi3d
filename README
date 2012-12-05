@@ -1,0 +1,29 @@
+
+Here is an implementation of the classic reversi game.
+Features include: 3D animation, game state in URL, multiplayer and original AI.
+To see it in action visit:
+
+http://reversi3d.appspot.com
+
+Client is written in js and uses webgl through three.js 3D library.
+Server is java servlet intended to be deployed to GAE.
+Local GAE server and ant were used for development.
+However game can partly function without server side.
+Game was tested with firefox and chrome on linux.
+Resources (sound, background) was not authored by me.
+Links to their original sources are mentioned inside the game.
+AI implementation was written by me earlier for another implementation.
+
+my main file, containing client js code (all in one)
+  war/reversi.html
+used client libs and resources:
+  war/three.min.js
+  war/*.ogg
+  war/sky.svg
+server and build configs:
+  war/WEB-INF/*.xml
+  build.xml
+server code:
+  src/Reversi*.java
+
+
