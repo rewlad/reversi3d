@@ -23,22 +23,23 @@ canvas { width: 100%; height: 100% }
     padding: 5px;
     display: inline-block;
 }
+#txt_rules, #txt_notes {
+    width: 80%;
+    height: 80%;
+    position: absolute;
+    background-color: #FFFFFF;
+    border: 2px solid #000000;
+    border-radius: 15px;
+    margin:30px 10%;
+    padding:20px;
+    display:none;
+}
 </style>
 </head><body> 
 <script type="text/javascript" src="/three.min.js"></script>
 <script type="text/javascript" src="/_ah/channel/jsapi"></script>
 <audio id="snd_slam"><source src="slam.ogg" type="audio/ogg" /></audio>
 <audio id="snd_fanfare"><source src="fanfare.ogg" type="audio/ogg" /></audio>
-<!--
-LIBS USED:
-http://mrdoob.github.com/three.js/
-https://developers.google.com/appengine/docs/java/channel/javascript
-
-ORIGINAL ART WAS PUBLISHED UNDER DIFFERENT CC TERMS AT:
-http://www.freesound.org/people/Timbre/sounds/110317/download/110317__timbre__remix-of-62176-fanfare-before-after.wav
-http://www.freesound.org/people/Lunardrive/sounds/48980/download/48980__lunardrive__metal-door-slam-soundsmith.wav
-http://openclipart.org/people/shokunin/shokunin_sky_with_clouds.svg
--->
 <script>'use strict';
 function board3d_viewer_constr(me){
     var renderer, camera, mouse, projector;
@@ -417,7 +418,8 @@ function player_constr(num){
     type.peer.state2hint = function(state){
         var hint_el = me.get_dom_el('hint');
         hint_el.className = 'hint';
-        var href = location.origin + location.pathname + '#' + peer_state(state);
+        var href = location.protocol + '//' + location.host + 
+            location.pathname + '#' + peer_state(state);
         hint_el.innerHTML = 'Send link <a href="'+href+'">'+href+'</a> to peer ';
         me.get_dom_el('main').appendChild(hint_el);
     };
@@ -559,10 +561,10 @@ window.onload = function(){
     p.appendChild(board3d_viewer.get_dom_el('main'));
     
     function div_level(c,j){
-        p.appendChild(c);
+        document.getElementById('ctl_area').appendChild(c);
         c.style.position = 'absolute';
         c.style.top = (20 + 35 * j)+'px';
-        c.style.left = '0px';
+        c.style.left = '20px';
     }
     function btn(ptel,btel,bgc,html,act){
         if(!bgc) bgc = '#00AA00';
@@ -589,6 +591,20 @@ window.onload = function(){
     btn(top_el, document.createElement('div'), 0,'reset with players',function(){ 
         hash_set_state(game_state(''))
     });
+    function txt_dialog(id,capt){
+        var txt_rules = document.getElementById(id);
+        btn(top_el,document.createElement('div'),0,capt,function(){ 
+            txt_rules.style.display = 'block';
+        });
+        var bts_el = document.createElement('div');
+        bts_el.style.textAlign = 'right';
+        txt_rules.appendChild(bts_el);
+        btn(bts_el,document.createElement('div'),0,'close',function(){ 
+            txt_rules.style.display = 'none';
+        });
+    }
+    txt_dialog('txt_rules','history &amp; rules');
+    txt_dialog('txt_notes','release features');
     
     players.forEach(function(pl,j){
         var num = j+1;
@@ -601,6 +617,7 @@ window.onload = function(){
     });
     
     var inp = document.createElement('input');
+    inp.style.display = 'none';
     inp.value = localStorage.getItem('reversi-background-image') || 'sky.svg';
     inp.onchange = function(ev){bgchange()};
     function bgchange(){
@@ -645,4 +662,66 @@ avoid robot turn
 avoid sync break hist
 */
 </script>
+<div id="ctl_area"></div>
+<div>
+    <div id="txt_rules">
+    <h1>REVERSI GAME</h1>
+    The origins of this game come down to 19th century. 
+    It’s a strategy game played by two players on an 8x8 board. 
+    There are 64 identical pieces called 'disks' with different colour on one and on the other side. 
+    Colors/sides correspond to players.
+    <br/><br/>
+    The game (it’s Othello version) begins with four disks placed in a square in the middle of the grid, 
+    two facing light-up, two pieces with the dark side up, with same-colored disks on a diagonal with each other. 
+    When the player makes the move he must place a piece with his side up on the board, 
+    in such a position that 
+    there exists at least one straight (horizontal, vertical, or diagonal) fully occupied by opponent's pieces line 
+    between the new piece and another his piece. 
+    After placing the piece, player turns over all opponent's pieces 
+    lying on a straight lines between the new piece and any other of his pieces. 
+    All reversed pieces now show his side, and he can use them in later moves, 
+    unless opponent has reversed them back during his turn.
+    <br/><br/>
+    If one player cannot make a valid move 
+    (a valid move is the one when at least one piece is reversed), 
+    play passes back to the other player. 
+    When none of players can move, the game ends. 
+    The player with the most pieces on the board at the end of the game wins.
+    </div>
+    
+    <div id="txt_notes">
+    <h2>The main features:</h2>
+    <ul>
+        <li>3D with movement animation</li>
+        <li>Multiplayer over the server</li>
+        <li>Original AI</li>
+        <li>Game state is kept in the page's URI, that imply:
+            <ul>
+                <li>undo/redo moves with the browser's back/forward buttons</li>
+                <li>save/transfer/load game with copy/bookmark</li>
+            </ul>
+        </li>
+    </ul>
+    
+    <h2>Known issues:</h2>
+    <ul>
+        <li>Browser history does not work as expected in multiplayer.</li>
+        <li>Game is testing in firefox and chrome, however it will likely not work in other browsers, that I do not have.</li>
+        <li>Game layout breaks on low window sizes.</li>
+    </ul>
+    
+    <h2>3rd party components used in the game:</h2>
+    <ul>
+        <li><a href="http://mrdoob.github.com/three.js/">three.js</a> 3D library (the only mandatory component) with <a href="http://learningthreejs.com/">examples</a>.</li>
+        <li><a href="https://developers.google.com/appengine/docs/java/channel/javascript">The Channel API</a> (Google App Engine).</li>
+        
+        <li>Original art, published under different CC terms:
+            <a href="http://www.freesound.org/people/Timbre/sounds/110317/download/110317__timbre__remix-of-62176-fanfare-before-after.wav">fanfare</a>,
+            <a href="http://www.freesound.org/people/Lunardrive/sounds/48980/download/48980__lunardrive__metal-door-slam-soundsmith.wav">slam</a>,
+            <a href="http://openclipart.org/people/shokunin/shokunin_sky_with_clouds.svg">sky</a>.</li>
+    </ul>
+
+    </div>
+    
+</div>
 </body></html> 
