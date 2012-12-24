@@ -23,7 +23,7 @@ canvas { width: 100%; height: 100% }
     padding: 5px;
     display: inline-block;
 }
-#txt_rules, #txt_notes, #txt_players {
+#txt_rules, #txt_notes, #txt_players, #txt_render_fail {
     width: 80%;
     height: 80%;
     position: absolute;
@@ -49,8 +49,21 @@ canvas { width: 100%; height: 100% }
 function board3d_viewer_constr(me){
     var renderer, camera, mouse, projector;
     me.get_dom_el = function(k){ return renderer.domElement };
+    /*
+    function canvas_renderer(){
+        return window.CanvasRenderingContext2D && new THREE.CanvasRenderer();
+    }
+    function webgl_renderer(){ try{ 
+        return  window.WebGLRenderingContext &&
+            document.createElement('canvas').getContext('experimental-webgl') &&
+            new THREE.WebGLRenderer();
+    }catch(e){} }*/
+    
+    
     me.init = function(scene,w,h){
-        renderer = new THREE.WebGLRenderer();
+        function nw(tp){ try{ return new(THREE[tp]) }catch(e){} }
+        renderer = nw('WebGLRenderer') || nw('CanvasRenderer');
+        if(!renderer) return 0;
         renderer.setSize(w,h);
         mouse = new THREE.Vector2();
         projector = new THREE.Projector();
@@ -59,7 +72,7 @@ function board3d_viewer_constr(me){
         camera.up.x = 0;
         camera.up.y = 0;
         camera.up.z = 1;
-        
+        return 1;
     }
     me.set_size = function(w,h){
         camera.aspect = w / h;
@@ -93,47 +106,54 @@ function make_fig_geometry(w,h,colors){
     return geometry;
 }
 
-function make_sq_geometry(r,ucolor,dcolor){
-    var geometry = new THREE.Geometry();
-    geometry.vertices.push( new THREE.Vector3(-r,-r));
-    geometry.vertices.push( new THREE.Vector3(+r,-r));
-    geometry.vertices.push( new THREE.Vector3(+r,+r));
-    geometry.vertices.push( new THREE.Vector3(-r,+r));
+function add_rect(geometry,x0,x1,y0,y1,ucolor,dcolor){
+    var l = geometry.vertices.length;
+    geometry.vertices.push( new THREE.Vector3(x0,y0));
+    geometry.vertices.push( new THREE.Vector3(x1,y0));
+    geometry.vertices.push( new THREE.Vector3(x1,y1));
+    geometry.vertices.push( new THREE.Vector3(x0,y1));
     function face(v0,v1,v2,v3,n,color){
         var normal = new THREE.Vector3(0,0,n);
         var ocolor = new THREE.Color(color);
-        geometry.faces.push(new THREE.Face4(v0, v1, v2, v3, normal, ocolor, 0));
+        var oface = new THREE.Face4(l+v0, l+v1, l+v2, l+v3, normal, ocolor, 0);
+        geometry.faces.push(oface);
     }
     face(0, 1, 2, 3, 1, ucolor);
     face(3, 2, 1, 0, -1, dcolor);
-    return geometry;
+}
+
+function make_sq_geom(r,ucolor,dcolor){
+    var geom = new THREE.Geometry();
+    add_rect(geom,-r,+r,-r,+r,ucolor,dcolor);
+    return geom;
 }
 
 function board3d_scene_constr(me){
-    var size = 8, sq_sz = 100, ln_r = 5;
+    var size = 8, sq_sz = 100, ln_r = 2.5;
     var grid_depth = 10, grid_color = 0xdddddd, cell_color = 0x00cc00, over_color = 0xffff00;
     var fig_height = 15, fig_width = 40;
 
     var scene = me.scene = new THREE.Scene();     
-    var material = new THREE.MeshLambertMaterial({vertexColors:true});
+    var material = new THREE.MeshLambertMaterial({vertexColors:THREE.FaceColors});
 
     var fig_geometry = make_fig_geometry(fig_width,fig_height,me.fig_colors);
-    var grid_geometry = make_sq_geometry(size/2*sq_sz+ln_r,grid_color,grid_color);
-    var cell_geometry = make_sq_geometry((sq_sz-ln_r)/2,cell_color,over_color);
-
-    var grid_mesh = new THREE.Mesh(grid_geometry, material);
-    grid_mesh.position.z = -grid_depth;
-    scene.add(grid_mesh);
+    var grid_geometry = make_sq_geom(sq_sz/2+ln_r, grid_color, grid_color);
+    var cell_geometry = make_sq_geom(sq_sz/2-ln_r, cell_color, over_color);
 
     var fig_list = [], cell_mesh_list = [];
     for(var ypos=0;ypos<size;ypos++){
         for(var xpos=0;xpos<size;xpos++){
             var fig_mesh = new THREE.Mesh(fig_geometry, material);
             var cell_mesh = new THREE.Mesh(cell_geometry, material);
-            cell_mesh.position.x = fig_mesh.position.x = (xpos-size/2+0.5)*sq_sz;
-            cell_mesh.position.y = fig_mesh.position.y = (ypos-size/2+0.5)*sq_sz;
+            var grid_mesh = new THREE.Mesh(grid_geometry, material);
+            grid_mesh.position.x = cell_mesh.position.x = fig_mesh.position.x = 
+                (xpos-size/2+0.5)*sq_sz;
+            grid_mesh.position.y = cell_mesh.position.y = fig_mesh.position.y = 
+                (ypos-size/2+0.5)*sq_sz;
+            grid_mesh.position.z = -grid_depth;
             scene.add(fig_mesh);
             scene.add(cell_mesh);
+            scene.add(grid_mesh);
             fig_list.push({mesh:fig_mesh});
             cell_mesh.board_pos = cell_mesh_list.length;
             cell_mesh_list.push(cell_mesh);
@@ -175,7 +195,7 @@ function board3d_scene_constr(me){
             var mv = fig.can_move = can_move && can_move[j];
             cell_mesh_list[j].rotation.y = mv ? Math.PI:0;
             cell_mesh_list[j].position.z = mv && over_board_pos===j 
-                ? -1-grid_depth : 1-grid_depth; 
+                ? -1-grid_depth : 1-grid_depth;
         });
     }
     me.state2dom = function(s){ state2q(s); state = s; };
@@ -540,7 +560,14 @@ window.onload = function(){
 
     var board3d_scene = board3d_scene_constr({fig_colors:hfig_colors});
     var board3d_viewer = board3d_viewer_constr({});
-    board3d_viewer.init(board3d_scene.scene, window.innerWidth, window.innerHeight);
+    if(!board3d_viewer.init(
+        board3d_scene.scene, 
+        window.innerWidth, 
+        window.innerHeight
+    )){
+        txt_dialog("txt_render_fail")();
+        return;
+    }
     var jumping = board3d_viewer.jumping = board3d_scene.jumping = {};
     jumping.scene = board3d_scene.scene;
     board3d_scene.state4local = function(gs){ return state4local===gs };
@@ -618,10 +645,13 @@ window.onload = function(){
     
     var inp = document.createElement('input');
     inp.style.display = 'none';
-    inp.value = localStorage.getItem('reversi-background-image') || 'sky.svg';
+    inp.value = 
+        window.localStorage && localStorage.getItem('reversi-background-image') || 
+        'sky.svg';
     inp.onchange = function(ev){bgchange()};
     function bgchange(){
-        localStorage.setItem('reversi-background-image',inp.value);
+        if(window.localStorage) 
+            localStorage.setItem('reversi-background-image',inp.value);
         p.style.background = "url("+inp.value+") no-repeat";
         p.style.backgroundSize = "100% 100%";
     };
@@ -735,6 +765,10 @@ avoid sync break hist
         -->
     </ul>
         <div id="players_bts"></div>
+    </div>
+    
+    <div id="txt_render_fail">
+        Your browser does not support canvas feature
     </div>
     
 </div>
