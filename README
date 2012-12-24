@@ -5,7 +5,7 @@ To see it in action visit:
 
 http://reversi3d.appspot.com
 
-Client is written in js and uses webgl through three.js 3D library.
+Client is written in js and uses webgl (with fallback to simple canvas) through three.js 3D library.
 Server is java servlet intended to be deployed to GAE.
 Local GAE server and ant were used for development.
 However game can partly function without server side.

@@ -397,7 +397,9 @@ function player_constr(num){
         function player_selector(tp){
             if(ctp!==tp && ctp!==type.none) return;
             var btel = me.get_dom_el('player_selector_'+tp.abbr);
-            me.btn( main_el, btel, me.bgcolor, tp.get_name(), function(){
+            if(tp.disabled && tp.disabled()) 
+                me.btn( main_el, btel, '#AAAAAA', tp.get_name(), function(){});
+            else me.btn( main_el, btel, me.bgcolor, tp.get_name(), function(){
                 if(tp.select){ tp.select(); return }
                 var state = me.get_state();
                 state.with_players(num,function(chan,pm,po){
@@ -438,6 +440,8 @@ function player_constr(num){
     type.server.get_name = function(){ return 'remote robot' };
     type.dummy.get_name  = function(){ return 'local robot' };
     
+    type.peer.disabled = function(){ return !window.goog };
+    type.server.disabled = function(){ return !window.goog };
     
     type.peer.state2hint = function(state){
         var hint_el = me.get_dom_el('hint');
@@ -753,7 +757,7 @@ avoid sync break hist
     <div id="txt_players">
     <h2>Select players</h2>
     <ul>
-        <li>remote players requires persistent availability to the server</li>
+        <li>remote human and remote robot require persistent availability of the <a href="http://reversi3d.appspot.com">server</a></li>
         <li>local robot -- stupid and greedy one</li>
         <li>remote robot -- advanced one, thinks many turns forward</li>
         <!--
