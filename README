@@ -1,4 +1,3 @@
-
 Here is an implementation of the classic reversi game.
 Features include: 3D animation, game state in URL, multiplayer and original AI.
 To see it in action visit:
@@ -26,4 +25,76 @@ server and build configs:
 server code:
   src/Reversi*.java
 
+---
 
+## Modern build & deployment
+
+The legacy App Engine bits have been replaced with a lightweight in-memory channel implementation so the original sources can run in a container or on Kubernetes without extra services.
+
+### Local build with Coursier
+
+1. Install [Coursier](https://get-coursier.io/docs/cli-installation) (`cs` binary).
+2. Resolve the servlet API and compile the servlets:
+
+   ```bash
+   mkdir -p build/WEB-INF/classes
+   deps=$(cs fetch --classpath javax.servlet:javax.servlet-api:3.1.0)
+   javac -encoding UTF-8 -cp "$deps" -d build/WEB-INF/classes $(find src -name '*.java')
+   ```
+
+   *If you are using JDK 11 or newer, add `--release 8` to the `javac` command so the classes run on the Jetty 8 runtime.*
+
+3. Stage the static assets and package an exploded WAR:
+
+   ```bash
+   cp -r war/. build/
+   jar -cf reversi3d.war -C build .
+   ```
+
+4. Drop the resulting WAR into any servlet container (Jetty/Tomcat compatible). Jetty already provides the servlet API so you don’t need to include the jar at runtime.
+
+### Container image
+
+The included `Dockerfile` mirrors the manual steps above: it downloads the Coursier launcher, resolves `javax.servlet-api`, compiles with `javac`, and copies the WAR into `jetty:9.4-jre8`.
+
+GitHub Actions (`.github/workflows/build-and-push.yml`) automatically builds and pushes an image to the GitHub Container Registry whenever `main` is updated. The resulting tag is `ghcr.io/<owner>/<repo>:<commit-sha>`. Grab the latest SHA from the workflow run summary or your commit history:
+
+```bash
+docker build -t your-registry/reversi3d:latest .
+docker run --rm -p 8080:8080 your-registry/reversi3d:latest
+# open http://localhost:8080/reversi.html
+```
+
+Push the image when ready:
+
+```bash
+docker push your-registry/reversi3d:latest
+```
+
+### Kubernetes deployment
+
+All Kubernetes manifests are generated on the fly by `scripts/deploy.py`, so you never have to edit committed YAML. The script streams JSON manifests to `kubectl apply -f -`, using the context you provide:
+
+```bash
+python scripts/deploy.py \
+  --context my-cluster \
+  --image ghcr.io/<owner>/<repo>:<commit-sha> \
+  --host reversi.example.com \
+  --tls-secret reversi-tls \
+  --namespace games
+```
+
+- `--context` is required and prevents accidental deployment to the wrong cluster.
+- `--image` should match the GHCR tag produced by the GitHub Action.
+- `--host`/`--tls-secret` populate the ingress (set `--skip-ingress` if you handle ingress separately).
+- Use `--replicas` to scale, `--namespace` to target a specific namespace, and `--skip-ingress` if you only want the `Deployment`/`Service`.
+
+The script always applies the deployment and a matching ClusterIP service; the ingress is optional.
+
+The generated ingress is annotated with `kubernetes.io/ingress.class: nginx`, assumes HTTPS, and references the TLS secret you pass. Ensure DNS points your hostname at the ingress controller and that the secret exists (for example, via cert-manager).
+
+### Notes
+
+- Remote multiplayer sessions are kept in-memory; restarting the pod/container drops active pairs. For production you should back the channel storage with something persistent.
+- `war/channel.js` plus `ReversiChannelServlet` emulate the App Engine Channel API so the existing client/server code stays untouched.
+- The build no longer depends on Maven or Ant; everything is handled by plain `javac`, Coursier, and the multi-stage Dockerfile.

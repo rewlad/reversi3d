@@ -1,0 +1,9 @@
+target
+build
+reversi3d.war
+.git
+.gitignore
+README
+build.xml
+*.iml
+*.log

@@ -1,23 +1,29 @@
-
 import java.io.IOException;
-import javax.servlet.http.*;
 import java.util.UUID;
-import com.google.appengine.api.channel.ChannelMessage;
-import com.google.appengine.api.channel.ChannelService;
-import com.google.appengine.api.channel.ChannelServiceFactory;
+import javax.servlet.http.*;
 
 public class ReversiPeerServlet extends HttpServlet {
-    public void doPost(HttpServletRequest req, HttpServletResponse resp)
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp)
         throws IOException 
     {
         String create = req.getParameter("create");
         String peer = req.getParameter("peer");
         String state = req.getParameter("state");
         resp.setContentType("text/plain");
-        ChannelService cs = ChannelServiceFactory.getChannelService();
-        if(create!=null) resp.getWriter().print(
-            create.equals("uuid") ? UUID.randomUUID() : cs.createChannel(create)
-        );
-        if(peer!=null) cs.sendMessage(new ChannelMessage(peer, state));
+        try{
+            if(create!=null){
+                if(create.equals("uuid")){
+                    resp.getWriter().print(UUID.randomUUID());
+                }else{
+                    resp.getWriter().print(ReversiChannelServlet.ChannelHub.createChannel(create));
+                }
+            }
+            if(peer!=null){
+                ReversiChannelServlet.ChannelHub.send(peer, state==null?"":state);
+            }
+        }catch(IllegalArgumentException ex){
+            resp.sendError(HttpServletResponse.SC_BAD_REQUEST, ex.getMessage());
+        }
     }
 }

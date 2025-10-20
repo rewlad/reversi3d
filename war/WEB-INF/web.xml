@@ -19,6 +19,14 @@
         <servlet-name>reversi-peer</servlet-name>
         <url-pattern>/peer/*</url-pattern>
     </servlet-mapping>
+    <servlet>
+        <servlet-name>reversi-channel</servlet-name>
+        <servlet-class>ReversiChannelServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>reversi-channel</servlet-name>
+        <url-pattern>/channel</url-pattern>
+    </servlet-mapping>
     
     <welcome-file-list>
         <welcome-file>reversi.html</welcome-file>
